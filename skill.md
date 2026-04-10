@@ -60,6 +60,8 @@ Everything else               → Article/webpage
 
 ### Step 2: Extract Content
 
+**GOLDEN RULE: For ANY video content (reels, TikToks, YouTube, Facebook videos, Snapchat, etc.), ALWAYS download the video and transcribe the actual audio with Whisper. Never rely on on-screen captions, auto-generated subtitles, or screenshot text alone — they are incomplete. The audio transcript is the source of truth. Screenshots and captions are supplementary only.**
+
 #### YouTube Videos
 Use the youtube-transcript skill approach:
 1. `yt-dlp --write-auto-sub --skip-download --sub-langs en --output "temp_ci" "URL"`
@@ -97,26 +99,48 @@ fi
 ```
 
 #### Instagram Reels
-Use yt-dlp with cookies to download, then transcribe:
+**IMPORTANT: Always download and transcribe the actual audio — never rely on on-screen captions alone. Captions may be incomplete, auto-generated, or missing entirely.**
 
+Extraction priority (try each in order until one works):
+
+**Method 1: yt-dlp with browser cookies (best quality)**
 ```bash
-# Download reel video
+# Download reel video with audio
 yt-dlp --cookies-from-browser chrome -o "temp_reel.%(ext)s" "$URL"
 
-# Extract audio for transcription
-ffmpeg -i temp_reel.mp4 -vn -acodec mp3 temp_reel_audio.mp3 2>/dev/null
+# Extract audio
+ffmpeg -i temp_reel.mp4 -vn -ar 16000 -ac 1 -c:a pcm_s16le temp_reel_audio.wav 2>/dev/null
 
-# Transcribe using whisper (local) or any whisper MCP tool
-# whisper temp_reel_audio.mp3 --model base --output_format txt
-
-# Also try to get the post caption/description
-# Use Playwright to navigate to the post and extract caption text
+# Transcribe with Whisper (use whisper-mcp tool if available, or local whisper)
+# This gives you the ACTUAL spoken words, not just what's on screen
 ```
 
-**If yt-dlp fails for Instagram** (no cookies configured):
-1. Try Playwright to navigate to the URL and screenshot the content
-2. Use Claude vision to read the screenshot
-3. If it's a video, flag that cookies need to be set up
+**Method 2: yt-dlp without cookies (sometimes works for public reels)**
+```bash
+yt-dlp -o "temp_reel.%(ext)s" "$URL"
+# If this works, extract audio and transcribe same as above
+```
+
+**Method 3: Playwright video capture (fallback)**
+```bash
+# Navigate to the reel URL with Playwright
+# Use browser_evaluate to find the video element source URL
+# Download the video directly from the source URL
+# Extract audio and transcribe with Whisper
+```
+
+**Method 4: Screenshot + caption extraction (LAST RESORT ONLY)**
+Only use this if all audio extraction methods fail:
+1. Navigate with Playwright, take screenshot
+2. Extract caption text from the page
+3. **Clearly note in the output that this is caption text only, NOT a full audio transcript**
+4. Flag: "Audio transcription unavailable — install browser cookies for yt-dlp: `yt-dlp --cookies-from-browser chrome`"
+
+**Also always extract the post caption/description** — this often contains links, hashtags, and context not mentioned in the video:
+```bash
+# Use Playwright to navigate to the post and extract caption text from the page DOM
+# OR: yt-dlp --print "%(description)s" "$URL" (if yt-dlp can access it)
+```
 
 #### Instagram Posts/Carousels
 Use Playwright to screenshot and extract:
@@ -129,27 +153,25 @@ Use Playwright to screenshot and extract:
 ```
 
 #### TikTok Videos
-Use yt-dlp to download, then transcribe (same flow as Instagram reels):
+**IMPORTANT: Always download and transcribe the actual audio — never rely on on-screen captions.**
 
 ```bash
 # Download TikTok video (yt-dlp supports TikTok natively)
 yt-dlp -o "temp_tiktok.%(ext)s" "$URL"
 
-# Extract audio for transcription
-ffmpeg -i temp_tiktok.mp4 -vn -acodec mp3 temp_tiktok_audio.mp3 2>/dev/null
+# Extract audio and transcribe with Whisper
+ffmpeg -i temp_tiktok.mp4 -vn -ar 16000 -ac 1 -c:a pcm_s16le temp_tiktok_audio.wav 2>/dev/null
+# Transcribe with whisper-mcp or local whisper
 
-# Transcribe using whisper
-# whisper temp_tiktok_audio.mp3 --model base --output_format txt
-
-# Get video description/caption
+# Get video description/caption (supplementary — not a replacement for audio transcript)
 TIKTOK_DESC=$(yt-dlp --print "%(description)s" "$URL" 2>/dev/null)
 TIKTOK_CREATOR=$(yt-dlp --print "%(uploader)s" "$URL" 2>/dev/null)
 ```
 
 **If yt-dlp fails for TikTok:**
 1. Try with `--cookies-from-browser chrome` flag
-2. Fallback to Playwright screenshot + vision analysis
-3. Short TikTok URLs (vm.tiktok.com) usually resolve — yt-dlp handles redirects
+2. Try Playwright to find the video source URL, download directly, then transcribe audio
+3. Screenshot + caption is LAST RESORT only — flag that audio transcript is missing
 
 #### X/Twitter Posts
 Extract tweet text and any embedded media:
